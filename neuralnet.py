@@ -67,3 +67,4 @@ class Network():
             a_layers.append(self.activationf(z_layers[n]))
 
         # Now we get the delta of the final layer and propagate backwards
+        delta = (self.costf).delta(z_layers[-1])
