@@ -215,6 +215,10 @@ class Network():
             self.vw = [np.zeros(w.shape) for w in self.weights]
             self.vb = [np.zeros(b.shape) for b in self.biases]
 
+        print(f"\n#### INITIALIZING NEURAL NETWORK WITH SETTINGS: ####\n   Number of layers: {self.num_layers}\n   Neurons per layer: {self.neurons_layers}\n   Activation function in hidden layers: {activationf_hidden}\n   Activation function in output layer: {activationf_output}\n   Cost function: {self.costf.__name__}")
+        print(f"   No regularization") if not self.reg else print(f"   Regularization type: {self.reg}")
+        print(f"   Ordinary gradient descent") if not self.momentum else print(f"   Momentum-based gradient descent\n")
+
 
     def initialize_weights(self):
         '''
@@ -241,7 +245,12 @@ class Network():
         return a
     
 
-    def stochastic_gradient_descent(self, trainingdata, batch_size, epochs, eta, lmbda = 0., mu = 0.):
+    def stochastic_gradient_descent(self, trainingdata, batch_size, epochs, eta, lmbda = 0., mu = 0.,
+                                    evaluationdata=None,
+                                    monitor_training_cost = False,
+                                    monitor_training_accuracy = False,
+                                    monitor_evaluation_cost = False,
+                                    monitor_evaluation_accuracy = False):
         '''
         Train the model using stochastic gradient descent
 
@@ -254,6 +263,10 @@ class Network():
         '''
 
         n = len(trainingdata)
+        if evaluationdata: n_eval = len(evaluationdata)
+
+        training_cost, training_accuracy, evaluation_cost, evaluation_accuracy= [], [], [], []
+
         for epoch in range(epochs):
             # At each epoch, shuffle the data, then divide it into subsets of size batch_size
             random.shuffle(trainingdata)
@@ -261,7 +274,34 @@ class Network():
 
             # For each batch update the parameters using backpropagation
             for minibatch in mini_batches:
-                self.updateparams_minibatch(minibatch, eta, len(trainingdata), lmbda, mu)
+                self.updateparams_minibatch(minibatch, eta, n, lmbda, mu)
+            print(f"Epoch {epoch} complete")
+
+            # Monitor the cost function on the training data
+            if monitor_training_cost:
+                epoch_cost = self.cost(trainingdata,lmbda)
+                monitor_training_cost.append(epoch_cost)
+                print(f"    Training cost: {epoch_cost}")
+
+            # Monitor the accuracy on the training data
+            if monitor_training_accuracy:
+                epoch_accuracy = self.accuracy(trainingdata,lmbda)
+                monitor_training_accuracy.append(epoch_accuracy)
+                print(f"    Training Accuracy: {epoch_accuracy}")
+
+            # Monitor the cost function on the evaluation data
+            if monitor_evaluation_cost:
+                epoch_cost = self.cost(evaluationdata,lmbda)
+                monitor_evaluation_cost.append(epoch_cost)
+                print(f"    evaluation cost: {epoch_cost}")
+            
+            # Monitor the accuracy on the evaluation data
+            if monitor_evaluation_accuracy:
+                epoch_accuracy = self.accuracy(evaluationdata,lmbda)
+                monitor_evaluation_accuracy.append(epoch_accuracy)
+                print(f"    evaluation Accuracy: {epoch_accuracy}")
+        
+        return training_cost, training_accuracy, evaluation_cost, evaluation_accuracy
     
 
     def updateparams_minibatch(self, minibatch, eta, n, lmbda, mu):
