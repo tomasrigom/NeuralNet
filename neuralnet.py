@@ -56,11 +56,11 @@ class ReluActivation():
     '''    
     @staticmethod
     def evaluate(z):
-        return z if z>0 else 0
+        return np.maximum(0,z)
     
     @staticmethod
     def derivative(z):
-        return 1 if z>0 else 0
+        return np.where(z > 0, 1, 0)
 
     
 class SoftmaxActivation():
@@ -120,7 +120,7 @@ class CrossEntropyCost():
     
     def delta(self,z,a,y,activationf):
         # If the activation function of the output layer is chosen a sigmoid, the learning slowdown problem is solved: this is optimal
-        if activationf.__qualname__ == 'SigmoidActivation.evaluate':
+        if activationf.__class__.__name__ == 'SigmoidActivation':
             return a - y
         
         else:
@@ -142,7 +142,7 @@ class LoglikelyCost():
     
     def delta(self,z,a,y,activationf):
         # If the activation function of the output layer is chosen a sigmoid, the learning slowdown problem is solved: this is optimal
-        if activationf.__qualname__ == 'SoftmaxActivation.evaluate':
+        if activationf.__class__.__name__ == 'SoftmaxActivation':
             return a - y
         
         else:
@@ -201,8 +201,8 @@ class Network():
         
         self.initialize_weights()
 
-        if self.neurons_layers > 2:
-            self.activationf = [activationf_hidden] * (self.neurons_layers-2) + [activationf_output]
+        if self.num_layers > 2:
+            self.activationf = [activationf_hidden] * (self.num_layers-2) + [activationf_output]
         elif self.num_layers == 2:
             self.activationf = [activationf_output]
         else:
@@ -215,7 +215,7 @@ class Network():
             self.vw = [np.zeros(w.shape) for w in self.weights]
             self.vb = [np.zeros(b.shape) for b in self.biases]
 
-        print(f"\n#### INITIALIZING NEURAL NETWORK WITH SETTINGS: ####\n   Number of layers: {self.num_layers}\n   Neurons per layer: {self.neurons_layers}\n   Activation function in hidden layers: {activationf_hidden}\n   Activation function in output layer: {activationf_output}\n   Cost function: {self.costf.__name__}")
+        print(f"\n#### INITIALIZING NEURAL NETWORK WITH SETTINGS: ####\n   Number of layers: {self.num_layers}\n   Neurons per layer: {self.neurons_layers}\n   Activation function in hidden layers: {activationf_hidden.__class__.__name__}\n   Activation function in output layer: {activationf_output.__class__.__name__}\n   Cost function: {self.costf.__class__.__name__}")
         print(f"   No regularization") if not self.reg else print(f"   Regularization type: {self.reg}")
         print(f"   Ordinary gradient descent") if not self.momentum else print(f"   Momentum-based gradient descent\n")
 
@@ -240,7 +240,7 @@ class Network():
 
         For each connection do the perceptron calculation w * a + b, and pass it through the activation function
         '''
-        for n, w, b in enumerate(zip(self.weights, self.biases)):
+        for n, (w, b) in enumerate(zip(self.weights, self.biases)):
             a = (self.activationf[n]).evaluate(np.dot(w,a) + b)
         return a
     
@@ -280,25 +280,25 @@ class Network():
             # Monitor the cost function on the training data
             if monitor_training_cost:
                 epoch_cost = self.cost(trainingdata,lmbda)
-                monitor_training_cost.append(epoch_cost)
+                training_cost.append(epoch_cost)
                 print(f"    Training cost: {epoch_cost}")
 
             # Monitor the accuracy on the training data
             if monitor_training_accuracy:
-                epoch_accuracy = self.accuracy(trainingdata,lmbda)
-                monitor_training_accuracy.append(epoch_accuracy)
+                epoch_accuracy = self.accuracy(trainingdata)
+                training_accuracy.append(epoch_accuracy)
                 print(f"    Training Accuracy: {epoch_accuracy}")
 
             # Monitor the cost function on the evaluation data
-            if monitor_evaluation_cost:
+            if monitor_evaluation_cost and evaluationdata:
                 epoch_cost = self.cost(evaluationdata,lmbda)
-                monitor_evaluation_cost.append(epoch_cost)
+                evaluation_cost.append(epoch_cost)
                 print(f"    evaluation cost: {epoch_cost}")
             
             # Monitor the accuracy on the evaluation data
-            if monitor_evaluation_accuracy:
-                epoch_accuracy = self.accuracy(evaluationdata,lmbda)
-                monitor_evaluation_accuracy.append(epoch_accuracy)
+            if monitor_evaluation_accuracy and evaluationdata:
+                epoch_accuracy = self.accuracy(evaluationdata)
+                evaluation_accuracy.append(epoch_accuracy)
                 print(f"    evaluation Accuracy: {epoch_accuracy}")
         
         return training_cost, training_accuracy, evaluation_cost, evaluation_accuracy
@@ -389,15 +389,15 @@ class Network():
             a_layers.append((self.activationf[n]).evaluate(z_layers[n]))
 
         # Now we get the delta of the final layer
-        delta = (self.costf).delta(z_layers[-1], a_layers[-1], y)
+        delta = (self.costf).delta(z_layers[-1], a_layers[-1], y, self.activationf[-1])
         pcost_pb[-1] = delta
-        pcost_pw[-1] = np.dot(delta,a_layers[-2].transpose())
+        pcost_pw[-1] = np.dot(delta,a_layers[-2].T)
 
         # Propagate backwards: loop from the second to last layer, backwards
         for l in range(2,self.num_layers):
-            delta = np.dot(self.weights[-l+1].transpose(), delta) * (self.activationf[-l]).derivative(z_layers[-l])
+            delta = np.dot(self.weights[-l+1].T, delta) * (self.activationf[-l]).derivative(z_layers[-l])
             pcost_pb[-l] = delta
-            pcost_pw[-l] = np.dot(delta, a_layers[-l-1].transpose())
+            pcost_pw[-l] = np.dot(delta, a_layers[-l-1].T)
 
         # Lastly return the resulting matrices
         return pcost_pw, pcost_pb
@@ -438,10 +438,10 @@ class Network():
         '''
         # Data is saved as a dictionary, as per usual with JSON files
         outmodel = {'neurons_layers':self.neurons_layers, 
-                    'weights':self.weights, 
-                    'biases':self.biases, 
-                    'activationf':[func.__name__ for func in self.activationf],
-                    'costf':self.costf.__name__ }
+                    'weights':[w.tolist() for w in self.weights], 
+                    'biases':[b.tolist() for b in self.biases], 
+                    'activationf':[func.__class__.__name__ for func in self.activationf],
+                    'costf':self.costf.__class__.__name__ }
         
         # Save to file
         with open(filename,'w') as outfile:
@@ -460,7 +460,7 @@ class Network():
         # Update the model's attributes to those from the file
         self.neurons_layers = inmodel['neurons_layers']
         self.num_layers = len(inmodel['neurons_layers'])
-        self.weights = inmodel['weights']
-        self.biases = inmodel['biases']
+        self.weights = [np.array(w) for w in inmodel['weights']]
+        self.biases = [np.array(b) for b in inmodel['biases']]
         self.activationf = [activationf_mapping[activationf] for activationf in inmodel['activationf']]
         self.costf = costf_mapping[inmodel['costf']]

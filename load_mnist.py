@@ -1,6 +1,6 @@
-import os
 import gzip
 import numpy as np
+import sys
 
 class MNISTLoader():
 
@@ -25,7 +25,7 @@ class MNISTLoader():
             # Read the image data
             buffer = f.read(num_images * num_rows * num_cols)
             images = np.frombuffer(buffer, dtype=np.uint8)
-            images = images.reshape(num_images, num_rows, num_cols)
+            images = images.reshape(num_images, num_rows*num_cols, 1)
             return images / 255.0  # Normalize to [0, 1]
 
     @staticmethod
@@ -41,6 +41,7 @@ class MNISTLoader():
             # Read the label data
             buffer = f.read(num_labels)
             labels = np.frombuffer(buffer, dtype=np.uint8)
+            labels = [np.eye(10)[label].reshape(10,1) for label in labels]
             return labels
     
     @staticmethod
