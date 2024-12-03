@@ -24,9 +24,8 @@ class MNISTLoader():
 
             # Read the image data
             buffer = f.read(num_images * num_rows * num_cols)
-            images = np.frombuffer(buffer, dtype=np.uint8)
-            images = images.reshape(num_images, num_rows*num_cols, 1)
-            return images / 255.0  # Normalize to [0, 1]
+            images = np.frombuffer(buffer, dtype=np.uint8).astype(np.float32)
+            return images.reshape(num_images, num_rows*num_cols, 1) / 255.0  # Normalize to [0, 1]
 
     @staticmethod
     def load_mnist_labels(filename):
@@ -41,21 +40,14 @@ class MNISTLoader():
             # Read the label data
             buffer = f.read(num_labels)
             labels = np.frombuffer(buffer, dtype=np.uint8)
-            labels = [np.eye(10)[label].reshape(10,1) for label in labels]
+            labels = np.eye(10, dtype=np.float32)[labels].reshape(-1,10,1)
             return labels
-    
-    @staticmethod
-    def convert(images, labels):
-        '''
-        Converts data format to that used by our neural network, i.e., a list of tuples (image, label)
-        '''
-        return [(image, label) for image, label in zip(images, labels)]
 
     def process_all(self):
         '''
         Processes all the data and turns it into the format desired by our neural network
         '''
-        training = MNISTLoader.convert(MNISTLoader.load_mnist_images(self.trainingdata), MNISTLoader.load_mnist_labels(self.traininglabels))
-        testing = MNISTLoader.convert(MNISTLoader.load_mnist_images(self.testingdata), MNISTLoader.load_mnist_labels(self.testinglabels))
+        training = list(zip(MNISTLoader.load_mnist_images(self.trainingdata), MNISTLoader.load_mnist_labels(self.traininglabels)))
+        testing = list(zip(MNISTLoader.load_mnist_images(self.testingdata), MNISTLoader.load_mnist_labels(self.testinglabels)))
 
         return training, testing

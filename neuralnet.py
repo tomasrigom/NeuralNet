@@ -17,7 +17,7 @@ class LinearActivation():
     
     @staticmethod
     def derivative(z):
-        return 1
+        return np.ones_like(1)
 
 class SigmoidActivation():
     '''
@@ -69,11 +69,11 @@ class SoftmaxActivation():
     '''
     @staticmethod
     def evaluate(z):
-        return np.exp(z) / sum(np.exp(z))
+        exp_z = np.exp(z)
+        return exp_z / sum(exp_z, axis=0, keepdims=True)
     
     @staticmethod
     def derivative(z):
-        ############################################3CORRCT THIS###############################################
         f = SoftmaxActivation.evaluate(z)
         return f*(1-f)
 
@@ -87,11 +87,11 @@ class LinearCost():
     '''
     @staticmethod
     def evaluate(a, y):
-        return np.sum(a-y)
+        return np.sum(np.abs(a-y))
     
     @staticmethod
     def delta(z,a,y,activationf):
-        return np.ones(len(a)) * activationf.derivative(z)
+        return np.ones_like(a) * activationf.derivative(z)
 
 class QuadraticCost():
     '''
@@ -99,7 +99,7 @@ class QuadraticCost():
     '''
     @staticmethod
     def evaluate(a, y):
-        return 0.5 * np.sum((a-y)**2)
+        return 0.5 * np.sum(np.square(a-y))
     
     @staticmethod
     def delta(z,a,y,activationf):
@@ -116,7 +116,10 @@ class CrossEntropyCost():
 
     @staticmethod
     def evaluate(a,y):
-        return np.sum(np.nan_to_num(-y*np.log(a)-(1-y)*np.log(1-a)))
+    #     return np.sum(np.nan_to_num(-y*np.log(a)-(1-y)*np.log(1-a)))
+        epsilon = 1e-14  # Small constant to avoid log(0)
+        a = np.clip(a, epsilon, 1 - epsilon)  # Clip a to be in [epsilon, 1 - epsilon]
+        return np.sum(-y * np.log(a) - (1 - y) * np.log(1 - a))
     
     def delta(self,z,a,y,activationf):
         # If the activation function of the output layer is chosen a sigmoid, the learning slowdown problem is solved: this is optimal
@@ -240,8 +243,8 @@ class Network():
 
         For each connection do the perceptron calculation w * a + b, and pass it through the activation function
         '''
-        for n, (w, b) in enumerate(zip(self.weights, self.biases)):
-            a = (self.activationf[n]).evaluate(np.dot(w,a) + b)
+        for w, b, activation in zip(self.weights, self.biases, self.activationf):
+            a = activation.evaluate(np.dot(w,a) + b)
         return a
     
 
@@ -263,7 +266,6 @@ class Network():
         '''
 
         n = len(trainingdata)
-        if evaluationdata: n_eval = len(evaluationdata)
 
         training_cost, training_accuracy, evaluation_cost, evaluation_accuracy= [], [], [], []
 
@@ -314,35 +316,39 @@ class Network():
             - lmbda (float) : regularization parameter
             - mu (float) : friction parameter (only relevant if self.momentum = True)
         '''
+        # Some calculations to avoid re-calculating quantities
+        minibatch_size = len(minibatch)
+        eta_scaled = eta/minibatch_size
+
         #Initialize the sum of the partial derivatives of the cost with respect to the weights and the biases as zero
-        sum_pcost_pw = [np.zeros(w.shape) for w in self.weights]
-        sum_pcost_pb = [np.zeros(b.shape) for b in self.biases]
+        sum_pcost_pw = [np.zeros_like(w) for w in self.weights]
+        sum_pcost_pb = [np.zeros_like(b) for b in self.biases]
 
         # Add up the aforementioned derivatives for every training example in the mini-batch
         for batch in minibatch:
             pcost_pw, pcost_pb = self.backprop(batch[0],batch[1])
-            sum_pcost_pw = [sum_prev + new_term for sum_prev, new_term in zip(sum_pcost_pw, pcost_pw)]
-            sum_pcost_pb = [sum_prev + new_term for sum_prev, new_term in zip(sum_pcost_pb, pcost_pb)]
+            sum_pcost_pw = [np.add(sum_prev, new_term) for sum_prev, new_term in zip(sum_pcost_pw, pcost_pw)]
+            sum_pcost_pb = [np.add(sum_prev, new_term) for sum_prev, new_term in zip(sum_pcost_pb, pcost_pb)]
 
         # Now the function is different depending on whether we use normal or momentum-based gradient descent
         if self.momentum:
             # L1 regularization
             if self.reg == 'L1':
                 # Update velocities of the weights
-                self.vw = [mu*v - eta*(np.sign(w)*lmbda/n + sum_learned_w) / len(minibatch) for v, w, sum_learned_w in zip(self.vw, self.weights, sum_pcost_pw)]
+                self.vw = [mu*v - eta_scaled*(np.sign(w)*lmbda/n + sum_learned_w) for v, w, sum_learned_w in zip(self.vw, self.weights, sum_pcost_pw)]
 
             # L2 regularization
             elif self.reg == 'L2':
                 # Update velocities of the weights
-                self.vw = [mu*v - eta*(w*lmbda/n + sum_learned_w) / len(minibatch) for v, w, sum_learned_w in zip(self.vw, self.weights, sum_pcost_pw)]
+                self.vw = [mu*v - eta_scaled*(w*lmbda/n + sum_learned_w) for v, w, sum_learned_w in zip(self.vw, self.weights, sum_pcost_pw)]
 
             # No regularization
             else:
                 # Update velocities of the weights
-                self.vw = [mu*v - eta * sum_learned_w / len(minibatch) for v, sum_learned_w in zip(self.vw, sum_pcost_pw)]
+                self.vw = [mu*v - eta_scaled * sum_learned_w for v, sum_learned_w in zip(self.vw, sum_pcost_pw)]
 
             # Update velocities of the biases
-            self.vb = [mu*v - eta * sum_learned_b / len(minibatch) for v, sum_learned_b in zip(self.vb, sum_pcost_pb)]
+            self.vb = [mu*v - eta_scaled * sum_learned_b for v, sum_learned_b in zip(self.vb, sum_pcost_pb)]
 
             # Update weights and biases
             self.weights = [w + v for v, w in zip(self.vw, self.weights)]
@@ -352,20 +358,20 @@ class Network():
             # L1 regularization
             if self.reg == 'L1':
                 # Update the weights
-                self.weights = [w - eta*(np.sign(w)*lmbda/n + sum_learned_w) / len(minibatch) for w, sum_learned_w in zip(self.weights, sum_pcost_pw)]
+                self.weights = [w - eta_scaled*(np.sign(w)*lmbda/n + sum_learned_w) for w, sum_learned_w in zip(self.weights, sum_pcost_pw)]
 
             # L2 regularization
             elif self.reg == 'L2':
                 # Update weights
-                self.weights = [(1 - eta*lmbda/n)*w - eta * sum_learned_w / len(minibatch) for w, sum_learned_w in zip(self.weights, sum_pcost_pw)]
+                self.weights = [(1 - eta*lmbda/n)*w - eta_scaled * sum_learned_w for w, sum_learned_w in zip(self.weights, sum_pcost_pw)]
 
             # No regularization
             else:
                 # Update weights
-                self.weights = [w - eta * sum_learned_w / len(minibatch) for w, sum_learned_w in zip(self.weights, sum_pcost_pw)]
+                self.weights = [w - eta_scaled * sum_learned_w for w, sum_learned_w in zip(self.weights, sum_pcost_pw)]
 
             # Update biases
-            self.biases = [b - eta * sum_learned_b / len(minibatch) for b, sum_learned_b in zip(self.biases, sum_pcost_pb)]
+            self.biases = [b - eta_scaled * sum_learned_b for b, sum_learned_b in zip(self.biases, sum_pcost_pb)]
 
     
     def backprop(self, x, y):
@@ -376,8 +382,8 @@ class Network():
             - y (int) : expected result
         '''
         # Initialize the partial derivatives of the cost function with respect to the weights and biases to zero
-        pcost_pw = [np.zeros(weight.shape) for weight in self.weights]
-        pcost_pb = [np.zeros(bias.shape) for bias in self.biases]
+        pcost_pw = [np.zeros_like(weight) for weight in self.weights]
+        pcost_pb = [np.zeros_like(bias) for bias in self.biases]
 
         # Initialize the lists that will store the activations of all the layers and the intermediate perceptron sums z = a*w + b
         a_layers = [x]
@@ -396,8 +402,8 @@ class Network():
         # Propagate backwards: loop from the second to last layer, backwards
         for l in range(2,self.num_layers):
             delta = np.dot(self.weights[-l+1].T, delta) * (self.activationf[-l]).derivative(z_layers[-l])
-            pcost_pb[-l] = delta
-            pcost_pw[-l] = np.dot(delta, a_layers[-l-1].T)
+            pcost_pb[-l][:] = delta
+            pcost_pw[-l][:] = np.dot(delta, a_layers[-l-1].T)
 
         # Lastly return the resulting matrices
         return pcost_pw, pcost_pb
@@ -417,9 +423,12 @@ class Network():
         Returns the total cost of the data given this model
         The arguments of the method are analogous to those from self.accuracy
         '''
-        cost = 0.
-        for rawdata, label in data:
-            cost += (self.costf).evaluate(np.argmax(self.feedforward(rawdata)),np.argmax(label))
+        # Get the output activations of each training example
+        rawdata, labels = zip(*data)
+        activations = np.array([self.feedforward(x) for x in rawdata])
+
+        # Calculate the cost
+        cost = np.sum([self.costf.evaluate(a, label) for a,label in zip(activations, labels)])
         
         if self.reg == 'L1':
             cost += 0.5 * lmbda * sum(np.sum(abs(w)) for w in self.weights) 
