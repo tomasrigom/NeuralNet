@@ -186,9 +186,9 @@ class Network():
         Initialize network with inputs:
 
             - neurons_layers (list) : number of neurons in each layer
-            - activationf_hidden (class) : activation function of the neurons in the hidden layers
-            - activationf_output (class) : activation function of the neurons in the output layer
-            - costf (function) : cost function used to compute the cost
+            - activationf_hidden (class) : activation function class (defined above) of the neurons in the hidden layers
+            - activationf_output (class) : activation function class (defined above) of the neurons in the output layer
+            - costf (class) : cost function class (defined above) used to compute the cost
             - reg (string or None) : regularization type to use (None, L1, L2)
             - momentum (bool) : Indicates whether to use momentum-based gradient descent
 
@@ -200,7 +200,7 @@ class Network():
                 * self.weights (list of np.arrays) : weights of each layer connections, where the position (i,j,k) represents the weight of the connection between neuron j from layer i to the neuron k from layer i-1
                 * self.biases (list of np.arrays) : biases of each neuron in each layer, where the position (i,j) represents the bias of neuron j in layer i
             - self.activationf (list of classes) : activation function of the neurons in each layer
-            - self.costf (function) : same value and function as cost
+            - self.costf (class) : same value and function as cost
             - self.reg (string or None) : same value and function as reg
             - self.momentum (bool) : same value and function as bool. Initializing this parameter as True creates two new attributes for this model:
                 * self.vw : 'Velocity' of the weights
@@ -208,8 +208,6 @@ class Network():
         '''
         self.neurons_layers = neurons_layers
         self.num_layers = len(neurons_layers)
-        
-        self.initialize_weights()
 
         if self.num_layers > 2:
             self.activationf = [activationf_hidden] * (self.num_layers-2) + [activationf_output]
@@ -217,6 +215,8 @@ class Network():
             self.activationf = [activationf_output]
         else:
             raise Exception("Number of layers must be larger than 2")
+        
+        self.initialize_weights()
         
         self.costf = costf
         self.reg = reg
@@ -232,21 +232,30 @@ class Network():
 
     def initialize_weights(self):
         '''
-        Initialize the weights and biases of the neural network in two different ways:
-
-            - The weights are initialized using a normal distribution with mean zero and standard deviation 1 / sqrt(number of neurons connected to neuron)
-            - The biases are initialised simply using a normal distribution of mean zero and standard deviation 1
-
+        Initialize the weights and biases of the neural network.
+            - Layers with linear, sigmoid, tanh or softmax activations will be initialised using Xavier weight initialization. 
+            - Layers with ReLU activation will be initialised using He initialisation.
         '''
-        self.biases = [np.random.randn(neurons,1) for neurons in self.neurons_layers[1:]]
-        self.weights = [np.random.randn(neurons, neurons_prev)/np.sqrt(neurons_prev) for neurons, neurons_prev in zip(self.neurons_layers[1:], self.neurons_layers[:-1])]
+        self.biases = []
+        self.weights = []
+        for layer,activation in enumerate(self.activationf):
+            if activation.__class__.__name__ == 'LinearActivation' or activation.__class__.__name__ == 'SigmoidActivation' or activation.__class__.__name__ == 'TanhActivation' or activation.__class__.__name__ == 'SoftmaxActivation':
+                self.biases.append(np.random.randn(self.neurons_layers[layer+1],1))
+                self.weights.append(np.random.randn(self.neurons_layers[layer+1], self.neurons_layers[layer])/np.sqrt(self.neurons_layers[layer]))
+
+            elif activation.__class__.__name__ == 'ReluActivation':
+                self.biases.append(np.random.randn(self.neurons_layers[layer+1],1))
+                self.weights.append(np.random.randn(self.neurons_layers[layer+1], self.neurons_layers[layer]) * np.sqrt(2 / self.neurons_layers[layer]))
+
+            else:
+                raise Exception("No implemented initialization for the activation {activation.__class__.__name__}")
 
 
     def feedforward(self, a):
         '''
         Return the output of the network from the input activations 
 
-            - a (array of 1D arrays, or a single 1D array) : Activation values of the neurons in the input layer, for all training examples
+            - a (array of 1D arrays) : Activation values of the neurons in the input layer, for several training examples
 
         For each connection do the perceptron calculation w * a + b, and pass it through the activation function to the output. This is done in a vectorized way across all examples in a.
         '''
@@ -409,8 +418,8 @@ class Network():
         '''
         Obtains the value for the deltas using backpropagation algorithm for a single training example
 
-            - x (numpy array) : raw data
-            - y (numpy array) : one-hot vector indicating the label
+            - x (numpy array of 1D numpy arrays) : array containing the raw data of the different examples
+            - y (numpy array of 1D numpy arrays) : array containing one-hot vectors indicating the labels orresponding to each example in x
         '''
         # Initialize the partial derivatives of the cost function with respect to the weights and biases to zero
         pcost_pw = [np.zeros((x.shape[0], *w.shape), dtype = np.float32) for w in self.weights]
@@ -455,7 +464,7 @@ class Network():
 
     def cost(self, data, lmbda):
         '''
-        Returns the total cost of the data given this model
+        Returns the total cost of running the model on the data
         The arguments of the method are analogous to those from self.accuracy
         '''
         # Get the output activations of each training example
