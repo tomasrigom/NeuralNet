@@ -3,6 +3,8 @@ import random
 import json
 import sys
 
+import time
+
 ################################################################################################################
 # Activation functions
 ################################################################################################################
@@ -70,7 +72,8 @@ class SoftmaxActivation():
     @staticmethod
     def evaluate(z):
         exp_z = np.exp(z)
-        return exp_z / sum(exp_z, axis=0, keepdims=True)
+        # Note the sum is over axis=1, since the first index is kept for separating different examples or batches
+        return exp_z / sum(exp_z, axis=1, keepdims=True)
     
     @staticmethod
     def derivative(z):
@@ -87,7 +90,8 @@ class LinearCost():
     '''
     @staticmethod
     def evaluate(a, y):
-        return np.sum(np.abs(a-y))
+        # Note the sum is over axis=1, since the first index is kept for separating different examples or batches
+        return np.sum(np.abs(a-y), axis = 1)
     
     @staticmethod
     def delta(z,a,y,activationf):
@@ -99,7 +103,7 @@ class QuadraticCost():
     '''
     @staticmethod
     def evaluate(a, y):
-        return 0.5 * np.sum(np.square(a-y))
+        return 0.5 * np.sum((a-y)**2, axis = 1)
     
     @staticmethod
     def delta(z,a,y,activationf):
@@ -116,10 +120,10 @@ class CrossEntropyCost():
 
     @staticmethod
     def evaluate(a,y):
-    #     return np.sum(np.nan_to_num(-y*np.log(a)-(1-y)*np.log(1-a)))
         epsilon = 1e-14  # Small constant to avoid log(0)
         a = np.clip(a, epsilon, 1 - epsilon)  # Clip a to be in [epsilon, 1 - epsilon]
-        return np.sum(-y * np.log(a) - (1 - y) * np.log(1 - a))
+
+        return np.sum(-y * np.log(a) - (1 - y) * np.log(1 - a), axis=1)
     
     def delta(self,z,a,y,activationf):
         # If the activation function of the output layer is chosen a sigmoid, the learning slowdown problem is solved: this is optimal
@@ -141,18 +145,21 @@ class LoglikelyCost():
     '''
     @staticmethod
     def evaluate(a,y):
-        return -np.log(a[np.argmax(y)])
+        return -np.log(a[np.arange(a.shape[0]), np.argmax(y, axis=1)])
     
     def delta(self,z,a,y,activationf):
+        result = np.zeros_like(a)
         # If the activation function of the output layer is chosen a sigmoid, the learning slowdown problem is solved: this is optimal
         if activationf.__class__.__name__ == 'SoftmaxActivation':
-            return a - y
+            result[np.arange(a.shape[0]), np.argmax(y, axis=1)] = a[np.arange(a.shape[0]), np.argmax(y, axis=1)] - 1
         
         else:
             if self.flagwarned == 0:
                 print("######################################################\nWARNING: CHOICE OF OUTPUT LAYER ACTIVATION AND COST FUNCTION INEFFICIENT\n######################################################")
                 self.flagwarned = 1
-            return 
+            result[np.arange(a.shape[0]), np.argmax(y, axis=1)] = -activationf.derivative(z) / a[np.arange(a.shape[0]), np.argmax(y, axis=1)]
+
+        return result
 
 
 ################################################################################################################
@@ -215,8 +222,8 @@ class Network():
         self.reg = reg
         self.momentum = momentum
         if self.momentum:
-            self.vw = [np.zeros(w.shape) for w in self.weights]
-            self.vb = [np.zeros(b.shape) for b in self.biases]
+            self.vw = [np.zeros_like(w) for w in self.weights]
+            self.vb = [np.zeros_like(b) for b in self.biases]
 
         print(f"\n#### INITIALIZING NEURAL NETWORK WITH SETTINGS: ####\n   Number of layers: {self.num_layers}\n   Neurons per layer: {self.neurons_layers}\n   Activation function in hidden layers: {activationf_hidden.__class__.__name__}\n   Activation function in output layer: {activationf_output.__class__.__name__}\n   Cost function: {self.costf.__class__.__name__}")
         print(f"   No regularization") if not self.reg else print(f"   Regularization type: {self.reg}")
@@ -237,19 +244,20 @@ class Network():
 
     def feedforward(self, a):
         '''
-        Return the output of the network based on the 
+        Return the output of the network from the input activations 
 
-            - a (list) : Activation values of the neurons in the last layer
+            - a (array of 1D arrays, or a single 1D array) : Activation values of the neurons in the input layer, for all training examples
 
-        For each connection do the perceptron calculation w * a + b, and pass it through the activation function
+        For each connection do the perceptron calculation w * a + b, and pass it through the activation function to the output. This is done in a vectorized way across all examples in a.
         '''
         for w, b, activation in zip(self.weights, self.biases, self.activationf):
-            a = activation.evaluate(np.dot(w,a) + b)
+            a = activation.evaluate(np.dot(a, w.T) + b.T)
         return a
     
 
-    def stochastic_gradient_descent(self, trainingdata, batch_size, epochs, eta, lmbda = 0., mu = 0.,
-                                    evaluationdata=None,
+    def stochastic_gradient_descent(self, trainingdata, evaluationdata = None,
+                                    batch_size = 10, epochs = 40, eta = 0.1, lmbda = 0., mu = 0.,
+                                    dynamic_stop = (10,1e-2),
                                     monitor_training_cost = False,
                                     monitor_training_accuracy = False,
                                     monitor_evaluation_cost = False,
@@ -257,52 +265,72 @@ class Network():
         '''
         Train the model using stochastic gradient descent
 
-            - trainingdata (list of tuples (x, y)) : contains the (data, label) tuples to train the model
+            - trainingdata (list of tuples) : contains the (data, label) tuples to train the model
+                data is a numpy array
+                labels is a numpy array
+            - evaluationdata (list of tuples) : contains the (data, label) tuples to train the model
+                NOTE: This is not the same as the testing data. It is an intermediate set to test hyperparameters (batch_size, eta, lambda, mu, )
             - batch_size (int) : number of training examples per minibatch used
             - epochs (int) : number of epochs during which the model will be trained
             - eta (float) : learning rate
             - lmbda (float) : regularization parameter
-            - mu (float) momentum co-efficient (only relevant if self.momentum = True)
+            - mu (float) : momentum co-efficient (only relevant if self.momentum = True)
+            - dynamic_stop (tuple (int, float)) : If the first element is set to a positive value, it will stop training when dynamic_stop[0] epochs pass without the cost decreasing by more than dynamic_stop[1]
+            - monitor_training_cost (bool) : If True, prints the cost on the training data at each epoch
+            - monitor_training_accuracy (bool) : If True, prints the accuracy on the training data at each epoch
+            - monitor_evaluation_cost (bool) : If True, prints the cost on the evaluation data at each epoch
+            - monitor_evaluation_accuracy (bool) : If True, prints the accuracy on the evaluation data at each epoch
         '''
-
+        t_begin = time.time()
         n = len(trainingdata)
-
         training_cost, training_accuracy, evaluation_cost, evaluation_accuracy= [], [], [], []
 
         for epoch in range(epochs):
+            t_epoch = time.time()
             # At each epoch, shuffle the data, then divide it into subsets of size batch_size
             random.shuffle(trainingdata)
-            mini_batches = [trainingdata[i:i+batch_size] for i in range(0,n,batch_size)]
+            mini_batches = [trainingdata[i:i+batch_size] for i in range(0, n, batch_size)]
 
             # For each batch update the parameters using backpropagation
             for minibatch in mini_batches:
                 self.updateparams_minibatch(minibatch, eta, n, lmbda, mu)
-            print(f"Epoch {epoch} complete")
+            print(f"Epoch {epoch} complete in {time.time()-t_epoch:.1f} seconds")
 
             # Monitor the cost function on the training data
             if monitor_training_cost:
                 epoch_cost = self.cost(trainingdata,lmbda)
                 training_cost.append(epoch_cost)
-                print(f"    Training cost: {epoch_cost}")
+                print(f"    Training cost: {epoch_cost:.2f}")
 
             # Monitor the accuracy on the training data
             if monitor_training_accuracy:
                 epoch_accuracy = self.accuracy(trainingdata)
                 training_accuracy.append(epoch_accuracy)
-                print(f"    Training Accuracy: {epoch_accuracy}")
+                print(f"    Training accuracy: {epoch_accuracy:.2f}%")
 
             # Monitor the cost function on the evaluation data
             if monitor_evaluation_cost and evaluationdata:
                 epoch_cost = self.cost(evaluationdata,lmbda)
                 evaluation_cost.append(epoch_cost)
-                print(f"    evaluation cost: {epoch_cost}")
+                print(f"    Evaluation cost: {epoch_cost:.2f}")
             
             # Monitor the accuracy on the evaluation data
             if monitor_evaluation_accuracy and evaluationdata:
                 epoch_accuracy = self.accuracy(evaluationdata)
                 evaluation_accuracy.append(epoch_accuracy)
-                print(f"    evaluation Accuracy: {epoch_accuracy}")
+                print(f"    Evaluation accuracy: {epoch_accuracy:.2f}%")
+
+            # Check if cost has stopped decreasing
+            if dynamic_stop[0] >= 0:
+                if not monitor_evaluation_accuracy and evaluationdata:
+                    epoch_accuracy = self.accuracy(evaluationdata)
+                    evaluation_accuracy.append(epoch_accuracy)
+
+                if epoch >= dynamic_stop[0] and evaluation_accuracy[epoch] - evaluation_accuracy[epoch - dynamic_stop[0]] < dynamic_stop[1]:
+                    print(f"Difference in {dynamic_stop[0]} epochs smaller than {dynamic_stop[1]} threshold: {evaluation_accuracy[epoch] - evaluation_accuracy[epoch - dynamic_stop[0]]}")
+                    break
         
+        print(f"\nModel trained in: {time.time() - t_begin:.1f} seconds\n")
         return training_cost, training_accuracy, evaluation_cost, evaluation_accuracy
     
 
@@ -316,6 +344,10 @@ class Network():
             - lmbda (float) : regularization parameter
             - mu (float) : friction parameter (only relevant if self.momentum = True)
         '''
+        rawdata, labels = zip(*minibatch)
+        rawdata = np.array(rawdata)
+        labels = np.array(labels)
+
         # Some calculations to avoid re-calculating quantities
         minibatch_size = len(minibatch)
         eta_scaled = eta/minibatch_size
@@ -325,11 +357,10 @@ class Network():
         sum_pcost_pb = [np.zeros_like(b) for b in self.biases]
 
         # Add up the aforementioned derivatives for every training example in the mini-batch
-        for batch in minibatch:
-            pcost_pw, pcost_pb = self.backprop(batch[0],batch[1])
-            sum_pcost_pw = [np.add(sum_prev, new_term) for sum_prev, new_term in zip(sum_pcost_pw, pcost_pw)]
-            sum_pcost_pb = [np.add(sum_prev, new_term) for sum_prev, new_term in zip(sum_pcost_pb, pcost_pb)]
-
+        pcost_pw, pcost_pb = self.backprop(rawdata,labels)
+        sum_pcost_pw = [np.sum(pcpw, axis=0) for pcpw in pcost_pw]
+        sum_pcost_pb = [np.sum(pcpb, axis=0) for pcpb in pcost_pb]
+       
         # Now the function is different depending on whether we use normal or momentum-based gradient descent
         if self.momentum:
             # L1 regularization
@@ -348,7 +379,7 @@ class Network():
                 self.vw = [mu*v - eta_scaled * sum_learned_w for v, sum_learned_w in zip(self.vw, sum_pcost_pw)]
 
             # Update velocities of the biases
-            self.vb = [mu*v - eta_scaled * sum_learned_b for v, sum_learned_b in zip(self.vb, sum_pcost_pb)]
+            self.vb = [mu*v - eta_scaled * sum_learned_b[:,np.newaxis] for v, sum_learned_b in zip(self.vb, sum_pcost_pb)]
 
             # Update weights and biases
             self.weights = [w + v for v, w in zip(self.vw, self.weights)]
@@ -379,11 +410,11 @@ class Network():
         Obtains the value for the deltas using backpropagation algorithm for a single training example
 
             - x (numpy array) : raw data
-            - y (int) : expected result
+            - y (numpy array) : one-hot vector indicating the label
         '''
         # Initialize the partial derivatives of the cost function with respect to the weights and biases to zero
-        pcost_pw = [np.zeros_like(weight) for weight in self.weights]
-        pcost_pb = [np.zeros_like(bias) for bias in self.biases]
+        pcost_pw = [np.zeros((x.shape[0], *w.shape), dtype = np.float32) for w in self.weights]
+        pcost_pb = [np.zeros((x.shape[0], *b.shape), dtype = np.float32) for b in self.biases]
 
         # Initialize the lists that will store the activations of all the layers and the intermediate perceptron sums z = a*w + b
         a_layers = [x]
@@ -391,19 +422,19 @@ class Network():
 
         # We use the introduced data to feedforward and get a result, storing the zs and activations
         for n, (w, b) in enumerate(zip(self.weights, self.biases)):
-            z_layers.append(np.dot(w,a_layers[n]) + b)
+            z_layers.append(np.dot(a_layers[n], w.T) + b.T)
             a_layers.append((self.activationf[n]).evaluate(z_layers[n]))
 
         # Now we get the delta of the final layer
         delta = (self.costf).delta(z_layers[-1], a_layers[-1], y, self.activationf[-1])
         pcost_pb[-1] = delta
-        pcost_pw[-1] = np.dot(delta,a_layers[-2].T)
+        pcost_pw[-1] = np.einsum('ij,ik->ijk', delta, a_layers[-2])
 
         # Propagate backwards: loop from the second to last layer, backwards
         for l in range(2,self.num_layers):
-            delta = np.dot(self.weights[-l+1].T, delta) * (self.activationf[-l]).derivative(z_layers[-l])
-            pcost_pb[-l][:] = delta
-            pcost_pw[-l][:] = np.dot(delta, a_layers[-l-1].T)
+            delta = np.dot(self.weights[-l+1].T,delta.T).T * (self.activationf[-l]).derivative(z_layers[-l])
+            pcost_pb[-l] = delta
+            pcost_pw[-l] = np.einsum('ij,ik->ijk', delta, a_layers[-l-1])
 
         # Lastly return the resulting matrices
         return pcost_pw, pcost_pb
@@ -416,7 +447,11 @@ class Network():
         
         where rawdata is the raw data, and label is a list representing which neuron represents the correct result (so all zeros except for one)
         '''
-        return 100. * np.sum([np.argmax(self.feedforward(rawdata)) == np.argmax(label) for rawdata, label in data])/len(data)
+        rawdata, labels = zip(*data)
+        rawdata = np.array(rawdata)
+        labels = np.array(labels)
+
+        return 100. * np.sum(np.argmax(self.feedforward(rawdata), axis=1) == np.argmax(labels, axis=1))/rawdata.shape[0]
 
     def cost(self, data, lmbda):
         '''
@@ -425,10 +460,13 @@ class Network():
         '''
         # Get the output activations of each training example
         rawdata, labels = zip(*data)
-        activations = np.array([self.feedforward(x) for x in rawdata])
+        rawdata = np.array(rawdata)
+        labels = np.array(labels)
+
+        activations = self.feedforward(rawdata)
 
         # Calculate the cost
-        cost = np.sum([self.costf.evaluate(a, label) for a,label in zip(activations, labels)])
+        cost = np.sum(self.costf.evaluate(activations, labels))
         
         if self.reg == 'L1':
             cost += 0.5 * lmbda * sum(np.sum(abs(w)) for w in self.weights) 
@@ -455,6 +493,7 @@ class Network():
         # Save to file
         with open(filename,'w') as outfile:
             json.dump(outmodel,outfile)
+        print(f"Model successfully saved at {filename}")
 
     def loadmodel(self, filename):
         '''
@@ -473,3 +512,5 @@ class Network():
         self.biases = [np.array(b) for b in inmodel['biases']]
         self.activationf = [activationf_mapping[activationf] for activationf in inmodel['activationf']]
         self.costf = costf_mapping[inmodel['costf']]
+
+        print(f"Model {filename} successfully loaded")

@@ -1,3 +1,5 @@
 testing.py
 __pycache__/
 *.png
+*.json
+*.txt
