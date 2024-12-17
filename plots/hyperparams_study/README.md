@@ -17,31 +17,32 @@ In the plots within this folder, all in '.png' format, the cost and accuracy of 
 The *etas.png* plot shows that both constant and variable values (i.e. functions) have been used for the training of the model. Three different functions have been used:
 
 - **\( f_1(\text{acc}) \)**: This is a function of the accuracy (acc) of the model and is defined as:
-  \[
-  f_1(\text{acc}) = 
-  \begin{cases} 
-  0.1 & \text{if } \text{acc} \geq 0.1 \\
-  0.5 \cdot \text{acc} & \text{otherwise}
-  \end{cases}
-  \]
+
+$$
+f_1(\text{acc}) = 
+\begin{cases} 
+0.1 & \text{if } \text{acc} \geq 0.1 \\
+0.5 \cdot \text{acc} & \text{otherwise}
+\end{cases}
+$$
 
 - **\( f_2(\text{acc}) \)**: This is a function of the accuracy (acc) as well, defined as:
-  \[
-  f_2(\text{acc}) = 
-  \begin{cases} 
-  0.1 & \text{if } \text{acc} \geq 0.1 \\
-  0.2 \cdot \text{acc} & \text{otherwise}
-  \end{cases}
-  \]
+$$
+f_2(\text{acc}) = 
+\begin{cases} 
+0.1 & \text{if } \text{acc} \geq 0.1 \\
+0.2 \cdot \text{acc} & \text{otherwise}
+\end{cases}
+$$
 
 - **\( f_3(\text{epoch}) \)**: This is instead a function of the epoch and is defined as:
-  \[
-  f_3(\text{epoch}) = 
-  \begin{cases} 
-  0.1 & \text{if } \text{epoch} \leq 60 \\
-  0.1 \cdot \exp(1 - \text{epoch} / 60) & \text{otherwise}
-  \end{cases}
-  \]
+$$
+f_3(\text{epoch}) = 
+\begin{cases} 
+0.1 & \text{if } \text{epoch} \leq 60 \\
+0.1 \cdot \exp(1 - \text{epoch} / 60) & \text{otherwise}
+\end{cases}
+$$
 
 I thought about these basic functions while experimenting with the code. It turns out that the function dependent on the epoch works best, but this might be attributed to maintaining a large learning rate until an advanced stage of the training.
 

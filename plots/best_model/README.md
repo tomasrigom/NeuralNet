@@ -9,26 +9,26 @@ This folder shows the results of training three different neural networks using 
 The network architecture consists of three layers with number of neurons **`[784, 480, 10]`**. The hyperparameters chosen are:
 
 - **Learning rate** scheduled decay of
- \[
-  f(\text{epoch}) = 
-  \begin{cases} 
-  0.1 & \text{if } \text{epoch} \leq 60 \\ 
-  0.1 \cdot \exp(1 - x/60) & \text{otherwise}
-  \end{cases}
-  \]
+$$
+f(\text{epoch}) = 
+\begin{cases} 
+0.1 & \text{if } \text{epoch} \leq 60 \\
+0.1 \cdot \exp(1 - x / 60) & \text{otherwise}
+\end{cases}
+$$
 - **L2 regularization** parameter of 0.1
 - **Momentum co-efficient** (for momentum-based gradient descent) of 0.3
 - **Batch size** (for stochastic gradient descent) of 160
 
 Furthermore, i manually changed the learning rate schedule for the ReLU-softmax-loglikely model, as it finished training due to early stopping before reaching 60 epochs (i.e. before starting to decay). The schedule was therefore changed to 
 
-\[
+$$
 f(\text{epoch}) = 
 \begin{cases} 
-0.1 & \text{if } \text{epoch} \leq 30 \\ 
-0.1 \cdot \exp(1 - x/30) & \text{otherwise}
+0.1 & \text{if } \text{epoch} \leq 30 \\
+0.1 \cdot \exp(1 - x / 30) & \text{otherwise}
 \end{cases}
-\]
+$$
 
 hence starting the decay of the learning rate earlier so the model does not stop too early.
 
