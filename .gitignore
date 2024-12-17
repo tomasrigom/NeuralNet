@@ -1,5 +1,5 @@
 testing.py
 __pycache__/
-*.png
+train_best_model_parallel.py
 *.json
 *.txt

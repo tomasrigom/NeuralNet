@@ -71,14 +71,28 @@ class SoftmaxActivation():
     '''
     @staticmethod
     def evaluate(z):
-        exp_z = np.exp(z)
+        # The maximum value is subtracted for numerical stability: this will not alter the result
+        exp_z = np.exp(z - np.max(z, axis=1, keepdims=True))
         # Note the sum is over axis=1, since the first index is kept for separating different examples or batches
-        return exp_z / sum(exp_z, axis=1, keepdims=True)
+        return exp_z / np.sum(exp_z, axis=1, keepdims=True)
     
     @staticmethod
-    def derivative(z):
+    def derivative(z,jacobian=False):
+        # NOTE: The distinction between returning the jacobian or not jacobian is only relevant for suboptimal output-cost choices. Nevertheless, i included it for completion
         f = SoftmaxActivation.evaluate(z)
-        return f*(1-f)
+        if jacobian:
+            jacobians = [np.zeros((example.shape[1],example.shape[1])) for example in z]
+            for softmax_vec, softmax_J in zip(f, jacobians):
+                for i in range(softmax_vec.shape[0]):
+                    for j in range(softmax_vec.shape[0]):
+                        if i==j:
+                            softmax_J[i,j] = softmax_vec[i]*(1-softmax_vec[i])
+                        else:
+                            softmax_J[i,j] = -softmax_vec[i]*softmax_vec[j]
+            return softmax_J
+        
+        else:
+            return f*(1-f)
 
 ################################################################################################################
 # Cost functions
@@ -95,7 +109,12 @@ class LinearCost():
     
     @staticmethod
     def delta(z,a,y,activationf):
-        return np.ones_like(a) * activationf.derivative(z)
+        if activationf.__class__.__name__ == 'SoftmaxActivation':
+            return np.array([np.sum(J,axis=1) for J in activationf.derivative(z, jacobian=True)]).reshape(a.shape)
+                
+        else:
+            return np.ones_like(a) * activationf.derivative(z)
+
 
 class QuadraticCost():
     '''
@@ -107,7 +126,11 @@ class QuadraticCost():
     
     @staticmethod
     def delta(z,a,y,activationf):
-        return (a - y) * activationf.derivative(z)
+        if activationf.__class__.__name__ == 'SoftmaxActivation':
+            return np.array([np.dot(J, aidiff) for J, aidiff in zip(activationf.derivative(z, jacobian=True), a-y)]).reshape(a.shape)
+        
+        else:
+            return (a - y) * activationf.derivative(z)
 
         
 class CrossEntropyCost():
@@ -130,12 +153,16 @@ class CrossEntropyCost():
         if activationf.__class__.__name__ == 'SigmoidActivation':
             return a - y
         
+        elif activationf.__class__.__name__ == 'SoftmaxActivation':
+            return np.array([np.dot(J, aidiff) for J, aidiff in zip(activationf.derivative(z, jacobian=True), (a - y)/ a*(1 - a))]).reshape(a.shape)
+        
         else:
             if self.flagwarned == 0:
                 print("######################################################\nWARNING: CHOICE OF OUTPUT LAYER ACTIVATION AND COST FUNCTION INEFFICIENT\n######################################################")
                 self.flagwarned = 1
             return (a - y) * activationf.derivative(z) / a*(1 - a)
-            
+
+
 class LoglikelyCost():
     '''
     Class for the log-likelyhood cost function, including the function evaluation, and the delta value from the output layer
@@ -148,12 +175,12 @@ class LoglikelyCost():
         return -np.log(a[np.arange(a.shape[0]), np.argmax(y, axis=1)])
     
     def delta(self,z,a,y,activationf):
-        result = np.zeros_like(a)
         # If the activation function of the output layer is chosen a sigmoid, the learning slowdown problem is solved: this is optimal
         if activationf.__class__.__name__ == 'SoftmaxActivation':
-            result[np.arange(a.shape[0]), np.argmax(y, axis=1)] = a[np.arange(a.shape[0]), np.argmax(y, axis=1)] - 1
+            return a - y
         
         else:
+            result = 0
             if self.flagwarned == 0:
                 print("######################################################\nWARNING: CHOICE OF OUTPUT LAYER ACTIVATION AND COST FUNCTION INEFFICIENT\n######################################################")
                 self.flagwarned = 1
@@ -180,7 +207,8 @@ class Network():
                  activationf_output = SigmoidActivation(), 
                  costf = CrossEntropyCost(),
                  reg = 'L2',
-                 momentum = False):
+                 momentum = False,
+                 print_terminal = True):
 
         '''
         Initialize network with inputs:
@@ -191,6 +219,7 @@ class Network():
             - costf (class) : cost function class (defined above) used to compute the cost
             - reg (string or None) : regularization type to use (None, L1, L2)
             - momentum (bool) : Indicates whether to use momentum-based gradient descent
+            - print_terminal (bool): Indicates whether to print the logging on to the terminal
 
         and attributes:
 
@@ -205,6 +234,7 @@ class Network():
             - self.momentum (bool) : same value and function as bool. Initializing this parameter as True creates two new attributes for this model:
                 * self.vw : 'Velocity' of the weights
                 * self.vb : 'Velocity' of the biases
+            - self.print_terminal (bool): same as print_terminal input
         '''
         self.neurons_layers = neurons_layers
         self.num_layers = len(neurons_layers)
@@ -225,27 +255,35 @@ class Network():
             self.vw = [np.zeros_like(w) for w in self.weights]
             self.vb = [np.zeros_like(b) for b in self.biases]
 
-        print(f"\n#### INITIALIZING NEURAL NETWORK WITH SETTINGS: ####\n   Number of layers: {self.num_layers}\n   Neurons per layer: {self.neurons_layers}\n   Activation function in hidden layers: {activationf_hidden.__class__.__name__}\n   Activation function in output layer: {activationf_output.__class__.__name__}\n   Cost function: {self.costf.__class__.__name__}")
-        print(f"   No regularization") if not self.reg else print(f"   Regularization type: {self.reg}")
-        print(f"   Ordinary gradient descent") if not self.momentum else print(f"   Momentum-based gradient descent\n")
+        self.print_terminal = print_terminal
+
+        if self.print_terminal:
+            print(f"\n#### INITIALIZING NEURAL NETWORK WITH SETTINGS: ####\n   Number of layers: {self.num_layers}\n   Neurons per layer: {self.neurons_layers}\n   Activation function in hidden layers: {activationf_hidden.__class__.__name__}\n   Activation function in output layer: {activationf_output.__class__.__name__}\n   Cost function: {self.costf.__class__.__name__}")
+            print(f"   No regularization") if not self.reg else print(f"   Regularization type: {self.reg}")
+            print(f"   Ordinary gradient descent") if not self.momentum else print(f"   Momentum-based gradient descent\n")
 
 
     def initialize_weights(self):
         '''
         Initialize the weights and biases of the neural network.
-            - Layers with linear, sigmoid, tanh or softmax activations will be initialised using Xavier weight initialization. 
+            - Layers with linear, sigmoid, or tanh activations will be initialised using Xavier weight initialization. 
             - Layers with ReLU activation will be initialised using He initialisation.
+            - If the output layer is set to softmax, the corresponding weights and biases will be initialized to zero
         '''
         self.biases = []
         self.weights = []
         for layer,activation in enumerate(self.activationf):
-            if activation.__class__.__name__ == 'LinearActivation' or activation.__class__.__name__ == 'SigmoidActivation' or activation.__class__.__name__ == 'TanhActivation' or activation.__class__.__name__ == 'SoftmaxActivation':
+            if activation.__class__.__name__ == 'LinearActivation' or activation.__class__.__name__ == 'SigmoidActivation' or activation.__class__.__name__ == 'TanhActivation':
                 self.biases.append(np.random.randn(self.neurons_layers[layer+1],1))
                 self.weights.append(np.random.randn(self.neurons_layers[layer+1], self.neurons_layers[layer])/np.sqrt(self.neurons_layers[layer]))
 
             elif activation.__class__.__name__ == 'ReluActivation':
                 self.biases.append(np.random.randn(self.neurons_layers[layer+1],1))
                 self.weights.append(np.random.randn(self.neurons_layers[layer+1], self.neurons_layers[layer]) * np.sqrt(2 / self.neurons_layers[layer]))
+
+            elif activation.__class__.__name__ == 'SoftmaxActivation':
+                self.biases.append(np.zeros((self.neurons_layers[layer+1],1)))
+                self.weights.append(np.zeros((self.neurons_layers[layer+1], self.neurons_layers[layer])))
 
             else:
                 raise Exception("No implemented initialization for the activation {activation.__class__.__name__}")
@@ -265,8 +303,8 @@ class Network():
     
 
     def stochastic_gradient_descent(self, trainingdata, evaluationdata = None,
-                                    batch_size = 10, epochs = 40, eta = 0.1, lmbda = 0., mu = 0.,
-                                    dynamic_stop = (10,1e-2),
+                                    batch_size = 100, epochs = 400, eta = 0.1, eta_var = None, lmbda = 0.1, mu = 0.1,
+                                    dynamic_stop = (15,1e-2),
                                     monitor_training_cost = False,
                                     monitor_training_accuracy = False,
                                     monitor_evaluation_cost = False,
@@ -278,17 +316,18 @@ class Network():
                 data is a numpy array
                 labels is a numpy array
             - evaluationdata (list of tuples) : contains the (data, label) tuples to train the model
-                NOTE: This is not the same as the testing data. It is an intermediate set to test hyperparameters (batch_size, eta, lambda, mu, )
+                NOTE: This is not the same as the testing data. It is an intermediate set to test hyperparameters (batch_size, eta, lambda, mu, ...)
             - batch_size (int) : number of training examples per minibatch used
             - epochs (int) : number of epochs during which the model will be trained
-            - eta (float) : learning rate
+            - eta (float or function) : learning rate. It can be either a constant or a function of the variable specified in the parameters eta_var
+            - eta_var (str): specifies if the learning rate depends on the accuracy on the evaluation data ("evacc") or on the epoch ("epoch")
             - lmbda (float) : regularization parameter
             - mu (float) : momentum co-efficient (only relevant if self.momentum = True)
             - dynamic_stop (tuple (int, float)) : If the first element is set to a positive value, it will stop training when dynamic_stop[0] epochs pass without the cost decreasing by more than dynamic_stop[1]
-            - monitor_training_cost (bool) : If True, prints the cost on the training data at each epoch
-            - monitor_training_accuracy (bool) : If True, prints the accuracy on the training data at each epoch
-            - monitor_evaluation_cost (bool) : If True, prints the cost on the evaluation data at each epoch
-            - monitor_evaluation_accuracy (bool) : If True, prints the accuracy on the evaluation data at each epoch
+            - monitor_training_cost (bool) : If True, logs the cost on the training data at each epoch (and prints if self.print_terminal is True)
+            - monitor_training_accuracy (bool) : If True, logs the accuracy on the training data at each epoch (and prints if self.print_terminal is True)
+            - monitor_evaluation_cost (bool) : If True, logs the cost on the evaluation data at each epoch (and prints if self.print_terminal is True)
+            - monitor_evaluation_accuracy (bool) : If True, logs the accuracy on the evaluation data at each epoch (and prints if self.print_terminal is True)
         '''
         t_begin = time.time()
         n = len(trainingdata)
@@ -301,33 +340,64 @@ class Network():
             mini_batches = [trainingdata[i:i+batch_size] for i in range(0, n, batch_size)]
 
             # For each batch update the parameters using backpropagation
-            for minibatch in mini_batches:
-                self.updateparams_minibatch(minibatch, eta, n, lmbda, mu)
-            print(f"Epoch {epoch} complete in {time.time()-t_epoch:.1f} seconds")
+            if callable(eta):
+                if evaluationdata==None:
+                    raise Exception("If eta is made variable, an evaluation set is needed to evaluate it")
+                
+                if eta_var == 'evacc':
+                    eta_value = eta(1. - self.accuracy(evaluationdata)/100.)
+                elif eta_var == 'epoch':
+                    eta_value = eta(epoch)
+                else:
+                    raise Exception("Variable eta not compatible with its dependance")
+                
+                if self.print_terminal:
+                    print(f"Value of eta: {eta_value:.3f}")
+
+                for minibatch in mini_batches:
+                    self.updateparams_minibatch(minibatch, eta_value, n, lmbda, mu)
+
+                if self.print_terminal:
+                    print(f"Epoch {epoch} complete in {time.time()-t_epoch:.1f} seconds")
+
+            elif not callable(eta):
+                for minibatch in mini_batches:
+                    self.updateparams_minibatch(minibatch, eta, n, lmbda, mu)
+
+                if self.print_terminal:
+                    print(f"Epoch {epoch} complete in {time.time()-t_epoch:.1f} seconds")
 
             # Monitor the cost function on the training data
             if monitor_training_cost:
                 epoch_cost = self.cost(trainingdata,lmbda)
                 training_cost.append(epoch_cost)
-                print(f"    Training cost: {epoch_cost:.2f}")
+
+                if self.print_terminal:
+                    print(f"    Training cost: {epoch_cost:.2f}")
 
             # Monitor the accuracy on the training data
             if monitor_training_accuracy:
                 epoch_accuracy = self.accuracy(trainingdata)
                 training_accuracy.append(epoch_accuracy)
-                print(f"    Training accuracy: {epoch_accuracy:.2f}%")
+
+                if self.print_terminal:
+                    print(f"    Training accuracy: {epoch_accuracy:.2f}%")
 
             # Monitor the cost function on the evaluation data
             if monitor_evaluation_cost and evaluationdata:
                 epoch_cost = self.cost(evaluationdata,lmbda)
                 evaluation_cost.append(epoch_cost)
-                print(f"    Evaluation cost: {epoch_cost:.2f}")
+
+                if self.print_terminal:
+                    print(f"    Evaluation cost: {epoch_cost:.2f}")
             
             # Monitor the accuracy on the evaluation data
             if monitor_evaluation_accuracy and evaluationdata:
                 epoch_accuracy = self.accuracy(evaluationdata)
                 evaluation_accuracy.append(epoch_accuracy)
-                print(f"    Evaluation accuracy: {epoch_accuracy:.2f}%")
+
+                if self.print_terminal:
+                    print(f"    Evaluation accuracy: {epoch_accuracy:.2f}%")
 
             # Check if cost has stopped decreasing
             if dynamic_stop[0] >= 0:
@@ -336,10 +406,14 @@ class Network():
                     evaluation_accuracy.append(epoch_accuracy)
 
                 if epoch >= dynamic_stop[0] and evaluation_accuracy[epoch] - evaluation_accuracy[epoch - dynamic_stop[0]] < dynamic_stop[1]:
-                    print(f"Difference in {dynamic_stop[0]} epochs smaller than {dynamic_stop[1]} threshold: {evaluation_accuracy[epoch] - evaluation_accuracy[epoch - dynamic_stop[0]]}")
+                    if self.print_terminal:
+                        print(f"Difference in {dynamic_stop[0]} epochs smaller than {dynamic_stop[1]} threshold: {evaluation_accuracy[epoch] - evaluation_accuracy[epoch - dynamic_stop[0]]:.3f}")
+
                     break
         
-        print(f"\nModel trained in: {time.time() - t_begin:.1f} seconds\n")
+        if self.print_terminal:
+            print(f"\nModel trained in: {time.time() - t_begin:.1f} seconds\n")
+
         return training_cost, training_accuracy, evaluation_cost, evaluation_accuracy
     
 
@@ -502,7 +576,9 @@ class Network():
         # Save to file
         with open(filename,'w') as outfile:
             json.dump(outmodel,outfile)
-        print(f"Model successfully saved at {filename}")
+        
+        if self.print_terminal:
+            print(f"Model successfully saved at {filename}")
 
     def loadmodel(self, filename):
         '''
@@ -522,4 +598,5 @@ class Network():
         self.activationf = [activationf_mapping[activationf] for activationf in inmodel['activationf']]
         self.costf = costf_mapping[inmodel['costf']]
 
-        print(f"Model {filename} successfully loaded")
+        if self.print_terminal:
+            print(f"Model {filename} successfully loaded")
