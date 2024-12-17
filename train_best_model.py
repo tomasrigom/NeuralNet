@@ -161,6 +161,7 @@ def plot_data(data, filename):
     axs[0].legend()
     plt.tight_layout()
     plt.savefig(filename,dpi=200)
+    print("Figure saved at {filename}")
     plt.close()
 
     print(f"Models trained in: {[time/3600 for time in data['time'].values()]} hours")
