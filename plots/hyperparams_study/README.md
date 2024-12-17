@@ -16,15 +16,15 @@ In the plots within this folder, all in '.png' format, the cost and accuracy of 
 
 The *etas.png* plot shows that both constant and variable values (i.e. functions) have been used for the training of the model. Three different functions have been used:
 
-- **\( f_1(\text{acc}) \)**: This is a function of the accuracy (acc) of the model and is defined as:
+- **f_1(acc)**: This is a function of the accuracy (acc) of the model and is defined as:
 
 f_1( acc ) = 0.1 if (1 - acc) >= 0.1 else 0.5 * (1 - acc)
 
-- **\( f_2(\text{acc}) \)**: This is a function of the accuracy (acc) as well, defined as:
+- **f_2(acc)**: This is a function of the accuracy (acc) as well, defined as:
 
 f_2( acc ) = 0.1 if (1 - acc) >= 0.1 else 0.2 * (1 - acc)
 
-- **\( f_3(\text{epoch}) \)**: This is instead a function of the epoch and is defined as:
+- **f_3(epoch)**: This is instead a function of the epoch and is defined as:
 
 f_3 ( epoch ) = 0.1 if epoch <= 60 else 0.1 * exp(1 - x / 60)
 
