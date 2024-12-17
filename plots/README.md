@@ -1,10 +1,14 @@
 
-# Optimization study of the neural network using the MNIST dataset. 
+# Optimization Study
 
-The subfolders here contain:
+This study explores the optimization of our vanilla neural network's hyperparameters for its training on the **MNIST dataset**. The directory contains the following subfolders:
 
-    - hyperparams_study: Study of the effect of different hyperparameters on the cost and accuracy of the neural network neuralnet.py, and a README.md file containing relevant information.
+### 1. **`hyperparams_study`**
+This folder includes a study of the effect of different hyperparameters on the cost and accuracy of the neural network implemented in `neuralnet.py`, and a `README.md` file with relevant information summarizing the hyperparameter tuning process and findings.
 
-    - best_model: The information from hyperparams_study is used to train 3 different models (varying in the type of neuron, output and cost function) with the best hyperparameter choices. Here the cost and accuracy results of running such a model on the evaluation data during training are shown, as well as a README.md file with the results on the testing dataset.
+### 2. **`best_model`**
+This folder contains the results of training three different models using the optimal hyperparameters found in `hyperparams_study` while varying the type of neuron, output and cost function, and a `README.md` file detailing the study and results of running the models on the test dataset.
 
-Of course, the best_model could be further calibrated, as the choice of certain hyperparameters might affect others. These refinements, however, go beyond the scope of this exercise.
+---
+
+While the experiments in **best_model** use optimal hyperparameters derived from `hyperparams_study`, further calibration could be performed as some hyperparameters might have a dependence on others. This is why the approach of varying one parameter at a time might not be the best. These precise calibrations, however, are beyond the scope of this exercise.
