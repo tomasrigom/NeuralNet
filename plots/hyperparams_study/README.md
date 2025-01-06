@@ -1,7 +1,7 @@
 
 # Basic hyperparameter optimization study
 
-In this folder the results of a study on the hypermarameters of the neural network is shown, namely by varying each of the following parameters, one at a time::
+In this folder the results of a study on the hypermarameters of the neural network is shown, namely by varying each of the following parameters, one at a time:
 
 - The **learning rate** 'eta'
 - The **regularization parameter** 'lambda'

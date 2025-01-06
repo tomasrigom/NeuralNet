@@ -214,9 +214,9 @@ class Network():
         Initialize network with inputs:
 
             - neurons_layers (list) : number of neurons in each layer
-            - activationf_hidden (class) : activation function class (defined above) of the neurons in the hidden layers
-            - activationf_output (class) : activation function class (defined above) of the neurons in the output layer
-            - costf (class) : cost function class (defined above) used to compute the cost
+            - activationf_hidden (class) : activation function class of the neurons in the hidden layers
+            - activationf_output (class) : activation function class of the neurons in the output layer
+            - costf (class) : cost function class used to compute the cost
             - reg (string or None) : regularization type to use (None, L1, L2)
             - momentum (bool) : Indicates whether to use momentum-based gradient descent
             - print_terminal (bool): Indicates whether to print the logging on to the terminal
@@ -318,12 +318,12 @@ class Network():
             - evaluationdata (list of tuples) : contains the (data, label) tuples to train the model
                 NOTE: This is not the same as the testing data. It is an intermediate set to test hyperparameters (batch_size, eta, lambda, mu, ...)
             - batch_size (int) : number of training examples per minibatch used
-            - epochs (int) : number of epochs during which the model will be trained
+            - epochs (int) : maximum number of epochs during which the model will be trained
             - eta (float or function) : learning rate. It can be either a constant or a function of the variable specified in the parameters eta_var
             - eta_var (str): specifies if the learning rate depends on the accuracy on the evaluation data ("evacc") or on the epoch ("epoch")
             - lmbda (float) : regularization parameter
             - mu (float) : momentum co-efficient (only relevant if self.momentum = True)
-            - dynamic_stop (tuple (int, float)) : If the first element is set to a positive value, it will stop training when dynamic_stop[0] epochs pass without the cost decreasing by more than dynamic_stop[1]
+            - dynamic_stop (tuple (int, float)) : If the first element is set to a positive value, training will early-stop when dynamic_stop[0] epochs pass without the cost decreasing by more than dynamic_stop[1]
             - monitor_training_cost (bool) : If True, logs the cost on the training data at each epoch (and prints if self.print_terminal is True)
             - monitor_training_accuracy (bool) : If True, logs the accuracy on the training data at each epoch (and prints if self.print_terminal is True)
             - monitor_evaluation_cost (bool) : If True, logs the cost on the evaluation data at each epoch (and prints if self.print_terminal is True)
@@ -360,7 +360,7 @@ class Network():
                 if self.print_terminal:
                     print(f"Epoch {epoch} complete in {time.time()-t_epoch:.1f} seconds")
 
-            elif not callable(eta):
+            else:
                 for minibatch in mini_batches:
                     self.updateparams_minibatch(minibatch, eta, n, lmbda, mu)
 
@@ -600,3 +600,81 @@ class Network():
 
         if self.print_terminal:
             print(f"Model {filename} successfully loaded")
+
+    def pretrain_GreedyLayerAutoencoder(self, trainingdata, evaluationdata, 
+                                        pretrain_activationf_hidden = ReluActivation(), pretrain_activationf_output = SigmoidActivation(), pretrain_costf = CrossEntropyCost(),
+                                        batch_size = 100, epochs = 400, eta = 0.1, eta_var = None, lmbda = 0.1, mu = 0.1,
+                                        dynamic_stop = (15,1e-2),
+                                        monitor_training_cost = False,
+                                        monitor_training_accuracy = False,
+                                        monitor_evaluation_cost = False,
+                                        monitor_evaluation_accuracy = False,
+                                        print_terminal = False):
+        '''
+        Performs an unsupervised pre-training phase as a greedy layer-wise autoencoder, later using the encoding components as the initialization weights.
+            - trainingdata (list of tuples) : contains the (data, label) tuples to train the model. The function will only use the 'data' for the pretraining
+                data is a numpy array
+                labels is a numpy array
+            - evaluationdata (list of tuples) : contains the (data, label) tuples to train the model. The function will only use the 'data' for the pretraining
+                NOTE: This is not the same as the testing data. It is an intermediate set to test hyperparameters (batch_size, eta, lambda, mu, ...)
+            - pretrain_activationf_hidden (class) : activation function class of the neurons in the encoder
+            - pretrain_activationf_output (class) : activation function class of the neurons in the decoder
+            - pretrain_costf (class) : cost function class used to compute the cost of the autoencoder
+            - batch_size (int) : number of training examples per minibatch used for stochastic gradient descent
+            - epochs (int) : maximum number of epochs during which the pre-training will be done
+            - eta (float or function) : learning rate. It can be either a constant or a function of the variable specified in the parameters eta_var
+            - eta_var (str): specifies if the learning rate depends on the accuracy on the evaluation data ("evacc") or on the epoch ("epoch")
+            - lmbda (float) : regularization parameter
+            - mu (float) : momentum co-efficient (only relevant if self.momentum = True)
+            - dynamic_stop (tuple (int, float)) : If the first element is set to a positive value, training will early-stop when dynamic_stop[0] epochs pass without the cost decreasing by more than dynamic_stop[1]
+            - monitor_training_cost (bool) : If True, logs the cost on the training data at each epoch (and prints if self.print_terminal is True)
+            - monitor_training_accuracy (bool) : If True, logs the accuracy on the training data at each epoch (and prints if self.print_terminal is True)
+            - monitor_evaluation_cost (bool) : If True, logs the cost on the evaluation data at each epoch (and prints if self.print_terminal is True)
+            - monitor_evaluation_accuracy (bool) : If True, logs the accuracy on the evaluation data at each epoch (and prints if self.print_terminal is True)
+        '''
+        # We use training data and evaluation data with data = labels
+        autoencoder_trainingdata = [(x, x) for x, _ in trainingdata]
+        autoencoder_evaluationdata = [(x, x) for x, _ in evaluationdata]
+
+        if print_terminal:
+            print("\n\n ####################### BEGINNING PRE-TRAINING PHASE ####################### \n\n")
+
+        t = time.time()
+        for i, (n_layer, n_next) in enumerate(zip(self.neurons_layers[:-1],self.neurons_layers[1:])):
+            if self.print_terminal:
+                print(f"\nPre-training [{n_layer},{n_next},{n_layer}] from {self.neurons_layers}\n")
+
+            # Initialise autoencoder layer
+            layer_autoencoder = Network([n_layer, n_next, n_layer],
+                                        activationf_hidden=pretrain_activationf_hidden,
+                                        activationf_output=pretrain_activationf_output,
+                                        costf=pretrain_costf,
+                                        reg=self.reg,
+                                        momentum=self.momentum,
+                                        print_terminal=print_terminal)
+            
+            # Begin training
+            training_cost, training_accuracy, evaluation_cost, evaluation_accuracy = layer_autoencoder.stochastic_gradient_descent(
+                autoencoder_trainingdata, autoencoder_evaluationdata,
+                batch_size, epochs, eta, eta_var, lmbda, mu,
+                dynamic_stop,
+                monitor_training_cost,
+                monitor_training_accuracy,
+                monitor_evaluation_cost,
+                monitor_evaluation_accuracy)
+            
+            #Now we use the pre-trained encoder to set the initialized weights
+            self.weights[i] = layer_autoencoder.weights[0]
+            self.biases[i] = layer_autoencoder.biases[0]
+
+            # We get new data by passing our current data through the first layer
+            rawdata, _ = zip(*autoencoder_trainingdata)
+            autoencoder_trainingdata = [(x, x) for x in layer_autoencoder.activationf[0].evaluate(np.dot(np.array(rawdata), layer_autoencoder.weights[0].T) + layer_autoencoder.biases[0].T)]
+
+            rawdata, _ = zip(*autoencoder_evaluationdata)
+            autoencoder_evaluationdata = [(x, x) for x in layer_autoencoder.activationf[0].evaluate(np.dot(np.array(rawdata), layer_autoencoder.weights[0].T) + layer_autoencoder.biases[0].T)]
+
+        if print_terminal:
+            print(f"\n\n ############## PRE-TRAINING PHASE DONE IN {time.time() - t:.1f} ################## \n\n")
+            
+            
